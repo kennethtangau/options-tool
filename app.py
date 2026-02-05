@@ -5,14 +5,11 @@ import plotly.graph_objects as go
 import yfinance as yf
 from datetime import date, timedelta, datetime
 import uuid
-import json
-import base64
 
 # --- Page Config ---
 st.set_page_config(page_title="ASX Options Visualizer", layout="wide")
 
-# --- 1. ROBUST STATE INITIALIZATION (The Fix) ---
-# We run this function first to guarantee variables exist before usage.
+# --- 1. ROBUST STATE INITIALIZATION ---
 def init_session_state():
     if 'legs' not in st.session_state:
         st.session_state.legs = []
@@ -25,66 +22,6 @@ init_session_state()
 
 # --- Constants ---
 LEG_TYPES = ["Long Share", "Long Call", "Short Call", "Long Put", "Short Put"]
-
-# --- Helper: Shareable Links (URL <-> State) ---
-def update_url():
-    if 'legs' in st.session_state:
-        minified_legs = []
-        for l in st.session_state.legs:
-            leg_data = {
-                't': l['type'],
-                'q': l['quantity'],
-                'p': l.get('price', 0),
-                'k': l.get('strike', 0),
-                'c': l.get('premium_per_opt', 0),
-                'e': l['expiry'].strftime("%Y-%m-%d")
-            }
-            minified_legs.append(leg_data)
-        
-        json_str = json.dumps(minified_legs)
-        b64_str = base64.urlsafe_b64encode(json_str.encode()).decode()
-        
-        st.query_params["s"] = b64_str
-        st.query_params["ref"] = str(st.session_state.reference_price)
-        st.query_params["code"] = st.session_state.asx_code
-
-def load_from_url():
-    qp = st.query_params
-    if "s" in qp:
-        try:
-            b64_str = qp["s"]
-            json_str = base64.urlsafe_b64decode(b64_str).decode()
-            minified_legs = json.loads(json_str)
-            
-            rebuilt_legs = []
-            for m in minified_legs:
-                # Re-create leg using safer create_leg logic
-                # We temporarily set ref price from URL to ensure calcs are right
-                ref = float(qp.get("ref", 10.0))
-                st.session_state.reference_price = ref
-                
-                new_leg = create_leg(m['t'])
-                new_leg['quantity'] = m['q']
-                new_leg['expiry'] = datetime.strptime(m['e'], "%Y-%m-%d").date()
-                
-                if m['t'] == 'Long Share':
-                    new_leg['price'] = m['p']
-                    new_leg['share_val'] = m['p'] * m['q']
-                else:
-                    new_leg['strike'] = m['k']
-                    new_leg['premium_per_opt'] = m['c']
-                    new_leg['total_prem'] = m['c'] * m['q']
-                    if ref > 0:
-                        new_leg['strike_pct'] = round((m['k'] / ref) * 100, 1)
-                
-                rebuilt_legs.append(new_leg)
-            
-            st.session_state.legs = rebuilt_legs
-            if "code" in qp:
-                st.session_state.asx_code = qp["code"]
-                
-        except Exception as e:
-            st.error(f"Failed to load strategy from URL: {e}")
 
 # --- Helper Functions ---
 def fetch_price():
@@ -104,7 +41,6 @@ def fetch_price():
             for leg in st.session_state.legs:
                 if leg['type'] == 'Long Share':
                     leg['price'] = float(price)
-            update_url()
     except Exception as e:
         st.error(f"Error fetching price: {e}")
 
@@ -129,11 +65,9 @@ def create_leg(leg_type='Long Call'):
 
 def add_leg():
     st.session_state.legs.append(create_leg('Long Call'))
-    update_url()
 
 def remove_leg(leg_id):
     st.session_state.legs = [leg for leg in st.session_state.legs if leg['id'] != leg_id]
-    update_url()
 
 def set_strategy(strategy_name):
     st.session_state.legs = []
@@ -175,7 +109,6 @@ def set_strategy(strategy_name):
             l['premium_per_opt'] = float(round(t['premium'], 2))
             l['total_prem'] = l['premium_per_opt'] * l['quantity']
         st.session_state.legs.append(l)
-    update_url()
 
 # --- Calculation Logic ---
 def calc_pnl_for_legs(legs, price_range):
@@ -211,7 +144,6 @@ def on_strike_change(lid, strike_key, pct_key):
                 leg['strike_pct'] = round((new_strike / ref) * 100, 1)
                 st.session_state[pct_key] = leg['strike_pct']
             break
-    update_url()
 
 def on_pct_change(lid, strike_key, pct_key):
     new_pct = st.session_state[pct_key]
@@ -222,7 +154,6 @@ def on_pct_change(lid, strike_key, pct_key):
             leg['strike'] = round(ref * (new_pct / 100.0), 2)
             st.session_state[strike_key] = leg['strike']
             break
-    update_url()
 
 def on_share_qty_change(lid, qty_key, val_key):
     new_qty = st.session_state[qty_key]
@@ -232,7 +163,6 @@ def on_share_qty_change(lid, qty_key, val_key):
             leg['share_val'] = new_qty * leg['price']
             st.session_state[val_key] = leg['share_val']
             break
-    update_url()
 
 def on_share_val_change(lid, qty_key, val_key):
     new_val = st.session_state[val_key]
@@ -243,7 +173,6 @@ def on_share_val_change(lid, qty_key, val_key):
                 leg['quantity'] = int(new_val / leg['price'])
                 st.session_state[qty_key] = leg['quantity']
             break
-    update_url()
 
 def on_prem_unit_change(lid, qty_key, unit_key, total_key):
     new_unit = st.session_state[unit_key]
@@ -254,7 +183,6 @@ def on_prem_unit_change(lid, qty_key, unit_key, total_key):
             leg['total_prem'] = new_unit * qty
             st.session_state[total_key] = leg['total_prem']
             break
-    update_url()
 
 def on_prem_total_change(lid, qty_key, unit_key, total_key):
     new_total = st.session_state[total_key]
@@ -266,14 +194,6 @@ def on_prem_total_change(lid, qty_key, unit_key, total_key):
                 leg['premium_per_opt'] = new_total / qty
                 st.session_state[unit_key] = leg['premium_per_opt']
             break
-    update_url()
-
-# --- INIT: Load from URL if present ---
-# Ensure we run init first, then check URL
-init_session_state()
-if not st.session_state.get('legs'): # Use .get() to be safe
-    load_from_url()
-
 
 # ================= MAIN UI =================
 with st.sidebar:
@@ -289,25 +209,7 @@ with st.sidebar:
     min_chart = c1.number_input("Min X", value=float(round(ref*0.7, 2)), format="%.2f")
     max_chart = c2.number_input("Max X", value=float(round(ref*1.3, 2)), format="%.2f")
     
-    st.markdown("---")
-    st.markdown("### 🔗 Share Strategy")
-    if 'legs' in st.session_state and st.session_state.legs:
-         # Use the browser's current base URL or your custom domain
-         # This detects the current domain from the app context or defaults
-         base_url = "https://options-tool-kennethtangau.streamlit.app/"
-         
-         minified_legs = []
-         for l in st.session_state.legs:
-             minified_legs.append({
-                 't': l['type'], 'q': l['quantity'], 'p': l.get('price',0), 'k': l.get('strike',0),
-                 'c': l.get('premium_per_opt',0), 'e': l['expiry'].strftime("%Y-%m-%d")
-             })
-         json_str = json.dumps(minified_legs)
-         b64_str = base64.urlsafe_b64encode(json_str.encode()).decode()
-         final_url = f"{base_url}?s={b64_str}&ref={st.session_state.reference_price}&code={st.session_state.asx_code}"
-         
-         st.code(final_url, language=None)
-         st.caption("Copy this URL to share this exact strategy.")
+    # Share Strategy Removed as requested
 
 st.title("ASX Options Visualizer")
 
@@ -331,7 +233,7 @@ with col_other:
 st.markdown("---")
 st.markdown("### Strategy Builder")
 
-# SAFELY check for legs (The Fix)
+# SAFELY check for legs
 if not st.session_state.get('legs'):
     st.info("Select a strategy above or click '+ Add Leg'")
 
@@ -347,7 +249,6 @@ for i, leg in enumerate(st.session_state.legs):
                                  key=f"type_{lid}")
     if new_type != leg['type']:
         leg['type'] = new_type
-        update_url()
         st.rerun()
 
     if leg['type'] == 'Long Share':
@@ -438,7 +339,7 @@ if st.session_state.legs and min_chart < max_chart:
 
     fig.add_hline(y=0, line_color="black", line_width=1)
     
-    # RESTORED ANNOTATIONS (Arrows)
+    # ANNOTATIONS (Arrows)
     signs = np.sign(total_pnl)
     flips = np.where(np.diff(signs))[0]
     be_points = []
