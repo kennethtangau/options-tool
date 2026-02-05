@@ -17,17 +17,20 @@ if 'reference_price' not in st.session_state:
 if 'asx_code' not in st.session_state:
     st.session_state.asx_code = "BHP"
 
+LEG_TYPES = ["Long Share", "Long Call", "Short Call", "Long Put", "Short Put"]
+
 # --- Strategy Definitions ---
 def get_strat_legs(name, ref=100.0):
     legs = []
+    # Note: Using 100 qty as standard template base
     if name == "Bull Call Spread":
         legs.append({'type': 'Long Call', 'strike': ref, 'quantity': 100, 'premium': ref*0.05})
         legs.append({'type': 'Short Call', 'strike': ref*1.1, 'quantity': 100, 'premium': ref*0.02})
     elif name == "Covered Call":
-        legs.append({'type': 'Share', 'price': ref, 'quantity': 100})
+        legs.append({'type': 'Long Share', 'price': ref, 'quantity': 100})
         legs.append({'type': 'Short Call', 'strike': ref*1.1, 'quantity': 100, 'premium': ref*0.02})
     elif name == "Protected Put":
-        legs.append({'type': 'Share', 'price': ref, 'quantity': 100})
+        legs.append({'type': 'Long Share', 'price': ref, 'quantity': 100})
         legs.append({'type': 'Long Put', 'strike': ref*0.9, 'quantity': 100, 'premium': ref*0.03})
     elif name == "Bear Put Spread":
         legs.append({'type': 'Long Put', 'strike': ref, 'quantity': 100, 'premium': ref*0.05})
@@ -39,7 +42,7 @@ def get_strat_legs(name, ref=100.0):
         legs.append({'type': 'Long Call', 'strike': ref, 'quantity': 100, 'premium': ref*0.05})
         legs.append({'type': 'Long Put', 'strike': ref, 'quantity': 100, 'premium': ref*0.05})
     elif name == "Collar":
-        legs.append({'type': 'Share', 'price': ref, 'quantity': 100})
+        legs.append({'type': 'Long Share', 'price': ref, 'quantity': 100})
         legs.append({'type': 'Long Put', 'strike': ref*0.9, 'quantity': 100, 'premium': ref*0.03})
         legs.append({'type': 'Short Call', 'strike': ref*1.1, 'quantity': 100, 'premium': ref*0.02})
     return legs
@@ -70,7 +73,7 @@ def fetch_price():
         if price:
             st.session_state.reference_price = float(price)
             for leg in st.session_state.legs:
-                if leg['type'] == 'Share':
+                if leg['type'] == 'Long Share':
                     leg['price'] = float(price)
     except Exception as e:
         st.error(f"Error fetching price: {e}")
@@ -84,7 +87,7 @@ def create_leg(leg_type='Long Call'):
         'quantity': 100,
         'expiry': date.today() + timedelta(days=30),
     }
-    if leg_type == 'Share':
+    if leg_type == 'Long Share':
         new_leg['price'] = ref_price
         new_leg['share_val'] = ref_price * 100
     else:
@@ -108,7 +111,7 @@ def set_strategy(strategy_name):
     for t in templates:
         l = create_leg(t['type'])
         l['quantity'] = t['quantity']
-        if t['type'] == 'Share':
+        if t['type'] == 'Long Share':
             l['price'] = t['price']
             l['share_val'] = t['price'] * t['quantity']
         else:
@@ -123,7 +126,7 @@ def calc_pnl_for_legs(legs, price_range):
     total = np.zeros_like(price_range)
     for leg in legs:
         qty = leg.get('quantity', 100)
-        if leg['type'] == 'Share':
+        if leg['type'] == 'Long Share':
             pnl = (price_range - leg.get('price', 100)) * qty
         else:
             strike = leg.get('strike', 100)
@@ -186,7 +189,7 @@ def on_share_val_change(lid, qty_key, val_key):
                 st.session_state[qty_key] = new_qty
             break
 
-# NEW: Premium Sync Callbacks
+# Premium Sync Callbacks
 def on_prem_unit_change(lid, qty_key, unit_key, total_key):
     new_unit = st.session_state[unit_key]
     qty = st.session_state[qty_key]
@@ -227,7 +230,8 @@ def render_mini_chart(name):
         yaxis=dict(visible=False),
         showlegend=False,
         paper_bgcolor='rgba(0,0,0,0)',
-        plot_bgcolor='rgba(240,240,240,0.5)'
+        plot_bgcolor='rgba(240,240,240,0.5)',
+        hovermode=False # Disable hover on mini chart
     )
     return fig
 
@@ -287,31 +291,29 @@ if not st.session_state.legs:
 for i, leg in enumerate(st.session_state.legs):
     lid = leg['id']
     st.markdown(f"**Leg {i+1}**")
-    cols = st.columns([1.5, 1.2, 1.5, 1.5, 1.5, 1.5, 1.5, 0.5]) # Adjusted columns
+    cols = st.columns([1.5, 1.2, 1.5, 1.5, 1.5, 1.5, 1.5, 0.5])
     
-    # 1. Type
-    new_type = cols[0].selectbox("Type", ["Share", "Long Call", "Short Call", "Long Put", "Short Put"], 
-                                 index=["Share", "Long Call", "Short Call", "Long Put", "Short Put"].index(leg['type']), 
+    # 1. Type (Updated list)
+    new_type = cols[0].selectbox("Type", LEG_TYPES, 
+                                 index=LEG_TYPES.index(leg['type']), 
                                  key=f"type_{lid}")
     if new_type != leg['type']:
         leg['type'] = new_type
         st.rerun()
 
-    if leg['type'] == 'Share':
+    if leg['type'] == 'Long Share':
         # Share Sync Logic
         q_key = f"qty_{lid}"
         v_key = f"val_{lid}"
         
-        # Qty Input
         qty = cols[1].number_input("Quantity", value=int(leg['quantity']), step=100, key=q_key, 
                                  on_change=on_share_qty_change, args=(lid, q_key, v_key))
         
-        # Price
         price = cols[2].number_input("Price ($)", value=float(leg['price']), format="%.2f", key=f"s_price_{lid}")
         leg['price'] = price
         
-        # Value Input (Bi-Directional)
         if 'share_val' not in leg: leg['share_val'] = qty * price
+        
         cols[3].number_input("Value ($)", value=float(leg['share_val']), step=1000.0, format="%.2f", key=v_key,
                            on_change=on_share_val_change, args=(lid, q_key, v_key))
         
@@ -328,15 +330,11 @@ for i, leg in enumerate(st.session_state.legs):
         # Bi-Directional Premium Sync
         prem_unit_key = f"prem_{lid}"
         prem_total_key = f"prem_tot_{lid}"
-        
-        # Init total if missing
         if 'total_prem' not in leg: leg['total_prem'] = leg['premium_per_opt'] * qty
         
-        # Premium Per Option
         prem = cols[4].number_input("Prem ($) per Opt", value=float(leg['premium_per_opt']), step=0.05, format="%.2f", 
                                   key=prem_unit_key, on_change=on_prem_unit_change, args=(lid, q_key, prem_unit_key, prem_total_key))
         
-        # Total Premium
         cols[5].number_input("Total Prem ($)", value=float(leg['total_prem']), step=10.0, format="%.2f", 
                            key=prem_total_key, on_change=on_prem_total_change, args=(lid, q_key, prem_unit_key, prem_total_key))
         
@@ -354,61 +352,70 @@ st.markdown("### Payoff Analysis")
 
 if st.session_state.legs and min_chart < max_chart:
     price_range = np.linspace(min_chart, max_chart, 500)
-    pnl = calc_pnl_for_legs(st.session_state.legs, price_range)
+    total_pnl = calc_pnl_for_legs(st.session_state.legs, price_range)
     
-    # Breakeven
-    signs = np.sign(pnl)
+    fig = go.Figure()
+
+    # 1. Shading (Total P&L) - hoverinfo skip to hide from tooltip
+    pnl_pos = np.where(total_pnl >= 0, total_pnl, 0)
+    pnl_neg = np.where(total_pnl < 0, total_pnl, 0)
+    fig.add_trace(go.Scatter(x=price_range, y=pnl_pos, mode='lines', line=dict(width=0), fill='tozeroy', fillcolor='rgba(144, 238, 144, 0.5)', showlegend=False, hoverinfo='skip'))
+    fig.add_trace(go.Scatter(x=price_range, y=pnl_neg, mode='lines', line=dict(width=0), fill='tozeroy', fillcolor='rgba(255, 182, 193, 0.5)', showlegend=False, hoverinfo='skip'))
+    
+    # 2. Individual Leg Traces (The Breakdown)
+    colors = ['#FF9999', '#99FF99', '#9999FF', '#FFFF99', '#FFCC99'] # Pastel colors for legs
+    for i, leg in enumerate(st.session_state.legs):
+        single_leg_pnl = calc_pnl_for_legs([leg], price_range)
+        fig.add_trace(go.Scatter(
+            x=price_range, y=single_leg_pnl,
+            mode='lines',
+            name=f"Leg {i+1}: {leg['type']}",
+            line=dict(width=1.5, color=colors[i % len(colors)], dash='dashdot'),
+            hovertemplate=f"<b>{leg['type']} P&L: $ %{{y:,.0f}}</b><extra></extra>"
+        ))
+
+    # 3. Main Total P&L Line
+    fig.add_trace(go.Scatter(
+        x=price_range, y=total_pnl, mode='lines', name='Total P&L',
+        line=dict(color='darkblue', width=3),
+        hovertemplate="<b>Stock Price: $%{x:.2f}</b><br><b>Total P&L: $%{y:,.0f}</b><extra></extra>"
+    ))
+
+    # 4. Benchmark (Long Share Only comparison)
+    ref_qty = 100 # Assume benchmark is based on 100 shares
+    bench_pnl = (price_range - st.session_state.reference_price) * ref_qty
+    fig.add_trace(go.Scatter(
+        x=price_range, y=bench_pnl,
+        mode='lines', name=f'Benchmark ({ref_qty} Shares)',
+        line=dict(color='gray', dash='dot', width=2),
+        hovertemplate="Bench P&L: $%{y:,.0f}<extra></extra>"
+    ))
+
+    fig.add_hline(y=0, line_color="black", line_width=1)
+    
+    # Calculations for Annotations based on TOTAL P&L
+    signs = np.sign(total_pnl)
     flips = np.where(np.diff(signs))[0]
     be_points = []
     for f in flips:
         x1, x2 = price_range[f], price_range[f+1]
-        y1, y2 = pnl[f], pnl[f+1]
+        y1, y2 = total_pnl[f], total_pnl[f+1]
         if y2 != y1:
             x_zero = x1 - y1 * (x2 - x1) / (y2 - y1)
             be_points.append(x_zero)
             
-    # Max Profit/Loss
-    max_p = np.max(pnl)
-    max_l = np.min(pnl)
-    max_x = price_range[int(np.median(np.where(pnl == max_p)[0]))]
-    min_x = price_range[int(np.median(np.where(pnl == max_l)[0]))]
+    max_p = np.max(total_pnl)
+    max_l = np.min(total_pnl)
+    max_x = price_range[int(np.median(np.where(total_pnl == max_p)[0]))]
+    min_x = price_range[int(np.median(np.where(total_pnl == max_l)[0]))]
 
-    fig = go.Figure()
-    pnl_pos = np.where(pnl >= 0, pnl, 0)
-    pnl_neg = np.where(pnl < 0, pnl, 0)
-    
-    fig.add_trace(go.Scatter(x=price_range, y=pnl_pos, mode='lines', line=dict(width=0), fill='tozeroy', fillcolor='rgba(144, 238, 144, 0.5)', showlegend=False))
-    fig.add_trace(go.Scatter(x=price_range, y=pnl_neg, mode='lines', line=dict(width=0), fill='tozeroy', fillcolor='rgba(255, 182, 193, 0.5)', showlegend=False))
-    fig.add_trace(go.Scatter(x=price_range, y=pnl, mode='lines', name='Total P&L', line=dict(color='darkblue', width=3)))
-    fig.add_hline(y=0, line_color="black", line_width=1)
-    
     annotations = []
-    # BE Annotation
     for be in be_points:
-        annotations.append(dict(
-            x=be, y=0, xref="x", yref="y",
-            text=f"Break-Even Price: ${be:.2f}",
-            showarrow=True, arrowhead=2, ax=0, ay=-40,
-            bgcolor="white", bordercolor="black"
-        ))
-        
-    # Max Profit
+        annotations.append(dict(x=be, y=0, xref="x", yref="y", text=f"Break-Even: ${be:.2f}", showarrow=True, arrowhead=2, ax=0, ay=-40, bgcolor="white", bordercolor="black"))
     if max_p < 1e6:
-        annotations.append(dict(
-            x=max_x, y=max_p, xref="x", yref="y",
-            text=f"Max Profit: ${max_p:,.0f}",
-            showarrow=True, arrowhead=2, ax=0, ay=-40,
-            bgcolor="#e6ffe6", bordercolor="green"
-        ))
-        
-    # Max Loss
+        annotations.append(dict(x=max_x, y=max_p, xref="x", yref="y", text=f"Max Profit: ${max_p:,.0f}", showarrow=True, arrowhead=2, ax=0, ay=-40, bgcolor="#e6ffe6", bordercolor="green"))
     if max_l > -1e6:
-        annotations.append(dict(
-            x=min_x, y=max_l, xref="x", yref="y",
-            text=f"Max Loss: ${max_l:,.0f}",
-            showarrow=True, arrowhead=2, ax=0, ay=40,
-            bgcolor="#ffe6e6", bordercolor="red"
-        ))
+        annotations.append(dict(x=min_x, y=max_l, xref="x", yref="y", text=f"Max Loss: ${max_l:,.0f}", showarrow=True, arrowhead=2, ax=0, ay=40, bgcolor="#ffe6e6", bordercolor="red"))
 
     fig.update_layout(
         title="Profit / Loss at Expiration",
@@ -418,7 +425,8 @@ if st.session_state.legs and min_chart < max_chart:
         height=700,
         font=dict(size=14),
         yaxis=dict(autorange=True),
-        annotations=annotations
+        annotations=annotations,
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
     )
     
     st.plotly_chart(fig, use_container_width=True)
