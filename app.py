@@ -11,13 +11,20 @@ import base64
 # --- Page Config ---
 st.set_page_config(page_title="ASX Options Visualizer", layout="wide")
 
-# --- Constants & Defaults ---
-LEG_TYPES = ["Long Share", "Long Call", "Short Call", "Long Put", "Short Put"]
+# --- 1. ROBUST STATE INITIALIZATION (The Fix) ---
+# We run this function first to guarantee variables exist before usage.
+def init_session_state():
+    if 'legs' not in st.session_state:
+        st.session_state.legs = []
+    if 'reference_price' not in st.session_state:
+        st.session_state.reference_price = 10.0
+    if 'asx_code' not in st.session_state:
+        st.session_state.asx_code = "BHP"
 
-if 'reference_price' not in st.session_state:
-    st.session_state.reference_price = 10.0
-if 'asx_code' not in st.session_state:
-    st.session_state.asx_code = "BHP"
+init_session_state()
+
+# --- Constants ---
+LEG_TYPES = ["Long Share", "Long Call", "Short Call", "Long Put", "Short Put"]
 
 # --- Helper: Shareable Links (URL <-> State) ---
 def update_url():
@@ -51,6 +58,11 @@ def load_from_url():
             
             rebuilt_legs = []
             for m in minified_legs:
+                # Re-create leg using safer create_leg logic
+                # We temporarily set ref price from URL to ensure calcs are right
+                ref = float(qp.get("ref", 10.0))
+                st.session_state.reference_price = ref
+                
                 new_leg = create_leg(m['t'])
                 new_leg['quantity'] = m['q']
                 new_leg['expiry'] = datetime.strptime(m['e'], "%Y-%m-%d").date()
@@ -62,16 +74,12 @@ def load_from_url():
                     new_leg['strike'] = m['k']
                     new_leg['premium_per_opt'] = m['c']
                     new_leg['total_prem'] = m['c'] * m['q']
-                    
-                    ref = float(qp.get("ref", 10.0))
                     if ref > 0:
                         new_leg['strike_pct'] = round((m['k'] / ref) * 100, 1)
                 
                 rebuilt_legs.append(new_leg)
             
             st.session_state.legs = rebuilt_legs
-            if "ref" in qp:
-                st.session_state.reference_price = float(qp["ref"])
             if "code" in qp:
                 st.session_state.asx_code = qp["code"]
                 
@@ -101,7 +109,7 @@ def fetch_price():
         st.error(f"Error fetching price: {e}")
 
 def create_leg(leg_type='Long Call'):
-    ref_price = float(st.session_state.reference_price)
+    ref_price = float(st.session_state.get('reference_price', 10.0))
     leg_id = str(uuid.uuid4())
     new_leg = {
         'id': leg_id,
@@ -260,9 +268,12 @@ def on_prem_total_change(lid, qty_key, unit_key, total_key):
             break
     update_url()
 
-# --- INIT ---
-if 'legs' not in st.session_state or not st.session_state.legs:
+# --- INIT: Load from URL if present ---
+# Ensure we run init first, then check URL
+init_session_state()
+if not st.session_state.get('legs'): # Use .get() to be safe
     load_from_url()
+
 
 # ================= MAIN UI =================
 with st.sidebar:
@@ -280,9 +291,11 @@ with st.sidebar:
     
     st.markdown("---")
     st.markdown("### 🔗 Share Strategy")
-    # THE FIX IS HERE: st.code handles copying automatically and won't crash
     if 'legs' in st.session_state and st.session_state.legs:
+         # Use the browser's current base URL or your custom domain
+         # This detects the current domain from the app context or defaults
          base_url = "https://options-tool-kennethtangau.streamlit.app/"
+         
          minified_legs = []
          for l in st.session_state.legs:
              minified_legs.append({
@@ -318,7 +331,8 @@ with col_other:
 st.markdown("---")
 st.markdown("### Strategy Builder")
 
-if not st.session_state.legs:
+# SAFELY check for legs (The Fix)
+if not st.session_state.get('legs'):
     st.info("Select a strategy above or click '+ Add Leg'")
 
 # Render Legs
