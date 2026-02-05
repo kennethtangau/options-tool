@@ -24,7 +24,6 @@ def update_url():
     if 'legs' in st.session_state:
         minified_legs = []
         for l in st.session_state.legs:
-            # Save essential fields only
             leg_data = {
                 't': l['type'],
                 'q': l['quantity'],
@@ -64,7 +63,6 @@ def load_from_url():
                     new_leg['premium_per_opt'] = m['c']
                     new_leg['total_prem'] = m['c'] * m['q']
                     
-                    # Recalc strike % if ref exists
                     ref = float(qp.get("ref", 10.0))
                     if ref > 0:
                         new_leg['strike_pct'] = round((m['k'] / ref) * 100, 1)
@@ -134,7 +132,6 @@ def set_strategy(strategy_name):
     ref = float(st.session_state.reference_price)
     legs = []
     
-    # Strategy Logic (Simplified for brevity but identical logic)
     if strategy_name == "Bull Call Spread":
         legs.append({'type': 'Long Call', 'strike': ref, 'quantity': 100, 'premium': ref*0.05})
         legs.append({'type': 'Short Call', 'strike': ref*1.1, 'quantity': 100, 'premium': ref*0.02})
@@ -282,18 +279,10 @@ with st.sidebar:
     max_chart = c2.number_input("Max X", value=float(round(ref*1.3, 2)), format="%.2f")
     
     st.markdown("---")
-    # Share Link Section
     st.markdown("### 🔗 Share Strategy")
-    # We display the current URL so they can copy it
-    # Note: Streamlit doesn't support a one-click copy natively without extensions, 
-    # but a code block is easy to select/copy.
-    
-    # Construct full URL (assumes standard streamlit cloud url structure if you know it, otherwise just display path)
-    # Using st.query_params to get current state
-    base_url = "https://options-tool-kennethtangau.streamlit.app/" # Replace if different
-    
-    # We re-generate the query string to show it live
+    # THE FIX IS HERE: st.code handles copying automatically and won't crash
     if 'legs' in st.session_state and st.session_state.legs:
+         base_url = "https://options-tool-kennethtangau.streamlit.app/"
          minified_legs = []
          for l in st.session_state.legs:
              minified_legs.append({
@@ -304,7 +293,7 @@ with st.sidebar:
          b64_str = base64.urlsafe_b64encode(json_str.encode()).decode()
          final_url = f"{base_url}?s={b64_str}&ref={st.session_state.reference_price}&code={st.session_state.asx_code}"
          
-         st.text_input("Copy Link:", value=final_url, read_only=True)
+         st.code(final_url, language=None)
          st.caption("Copy this URL to share this exact strategy.")
 
 st.title("ASX Options Visualizer")
@@ -453,7 +442,7 @@ if st.session_state.legs and min_chart < max_chart:
 
     annotations = []
     for be in be_points:
-        annotations.append(dict(x=be, y=0, xref="x", yref="y", text=f"Break-Even: ${be:.2f}", showarrow=True, arrowhead=2, ax=0, ay=-40, bgcolor="white", bordercolor="black"))
+        annotations.append(dict(x=be, y=0, xref="x", yref="y", text=f"Break-Even Price: ${be:.2f}", showarrow=True, arrowhead=2, ax=0, ay=-40, bgcolor="white", bordercolor="black"))
     if max_p < 1e6:
         annotations.append(dict(x=max_x, y=max_p, xref="x", yref="y", text=f"Max Profit: ${max_p:,.0f}", showarrow=True, arrowhead=2, ax=0, ay=-40, bgcolor="#e6ffe6", bordercolor="green"))
     if max_l > -1e6:
@@ -468,6 +457,6 @@ if st.session_state.legs and min_chart < max_chart:
         font=dict(size=14),
         yaxis=dict(autorange=True),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-        annotations=annotations # Added back!
+        annotations=annotations
     )
     st.plotly_chart(fig, use_container_width=True)
