@@ -381,15 +381,20 @@ if st.session_state.legs and min_chart < max_chart:
         hovertemplate="<b>Stock Price: $%{x:.2f}</b><br><b>Total P&L: $%{y:,.0f}</b><extra></extra>"
     ))
 
-    # 4. Benchmark (Long Share Only comparison)
-    ref_qty = 100 # Assume benchmark is based on 100 shares
-    bench_pnl = (price_range - st.session_state.reference_price) * ref_qty
-    fig.add_trace(go.Scatter(
-        x=price_range, y=bench_pnl,
-        mode='lines', name=f'Benchmark ({ref_qty} Shares)',
-        line=dict(color='gray', dash='dot', width=2),
-        hovertemplate="Bench P&L: $%{y:,.0f}<extra></extra>"
-    ))
+    # 4. CONDITIONAL Benchmark (Only show if 'Long Share' exists)
+    has_share = any(leg['type'] == 'Long Share' for leg in st.session_state.legs)
+    if has_share:
+        # Find the share quantity to make the comparison fair
+        # We sum all share quantities (just in case multiple share legs exist)
+        share_qty = sum(leg['quantity'] for leg in st.session_state.legs if leg['type'] == 'Long Share')
+        
+        bench_pnl = (price_range - st.session_state.reference_price) * share_qty
+        fig.add_trace(go.Scatter(
+            x=price_range, y=bench_pnl,
+            mode='lines', name=f'Only Share P&L',
+            line=dict(color='gray', dash='dot', width=2),
+            hovertemplate="Only Share P&L: $%{y:,.0f}<extra></extra>"
+        ))
 
     fig.add_hline(y=0, line_color="black", line_width=1)
     
