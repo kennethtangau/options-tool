@@ -26,7 +26,6 @@ def fetch_price():
         ticker = yf.Ticker(code)
         # Try fast fetch, fallback to history
         price = ticker.info.get('currentPrice') or ticker.info.get('previousClose')
-        # If still none, try history (sometimes reliable for ASX)
         if not price:
             hist = ticker.history(period="1d")
             if not hist.empty:
@@ -136,26 +135,36 @@ def set_strategy(strategy_name):
         st.session_state.legs.extend([l1, l2, l3])
 
 
-# --- Bi-Directional Callbacks ---
-def on_strike_change(lid, key):
-    # User typed in Strike ($) -> We update %
-    val = st.session_state[key]
+# --- Bi-Directional Callbacks (THE FIX) ---
+def on_strike_change(lid, strike_key, pct_key):
+    # User updated Strike ($) -> We force update Pct (%)
+    new_strike = st.session_state[strike_key]
     ref = st.session_state.reference_price
+    
+    # Update Leg Data
     for leg in st.session_state.legs:
         if leg['id'] == lid:
-            leg['strike'] = val
+            leg['strike'] = new_strike
             if ref > 0:
-                leg['strike_pct'] = round((val / ref) * 100, 1)
+                new_pct = round((new_strike / ref) * 100, 1)
+                leg['strike_pct'] = new_pct
+                # FORCE update the other widget
+                st.session_state[pct_key] = new_pct
             break
 
-def on_pct_change(lid, key):
-    # User typed in % -> We update Strike ($)
-    val = st.session_state[key]
+def on_pct_change(lid, strike_key, pct_key):
+    # User updated Pct (%) -> We force update Strike ($)
+    new_pct = st.session_state[pct_key]
     ref = st.session_state.reference_price
+    
+    # Update Leg Data
     for leg in st.session_state.legs:
         if leg['id'] == lid:
-            leg['strike_pct'] = val
-            leg['strike'] = round(ref * (val / 100.0), 2)
+            leg['strike_pct'] = new_pct
+            new_strike = round(ref * (new_pct / 100.0), 2)
+            leg['strike'] = new_strike
+            # FORCE update the other widget
+            st.session_state[strike_key] = new_strike
             break
 
 # --- Calculation ---
@@ -200,17 +209,25 @@ with st.sidebar:
 # --- Main Area ---
 st.title("ASX Options Visualizer")
 
-st.markdown("### Quick Strategies")
-row1 = st.columns(4)
-if row1[0].button("Bull Call Spread", use_container_width=True): set_strategy("Bull Call Spread")
-if row1[1].button("Covered Call", use_container_width=True): set_strategy("Covered Call")
-if row1[2].button("Protected Put", use_container_width=True): set_strategy("Protected Put")
-if row1[3].button("Collar", use_container_width=True): set_strategy("Collar")
+# --- Strategy Buttons (Column Layout) ---
+st.markdown("### Common Strategies")
+col_bull, col_bear, col_other = st.columns(3)
 
-row2 = st.columns(3)
-if row2[0].button("Bear Put Spread", use_container_width=True): set_strategy("Bear Put Spread")
-if row2[1].button("Bear Call Spread", use_container_width=True): set_strategy("Bear Call Spread")
-if row2[2].button("Long Straddle", use_container_width=True): set_strategy("Long Straddle")
+with col_bull:
+    st.subheader("Bullish")
+    if st.button("Bull Call Spread", use_container_width=True): set_strategy("Bull Call Spread")
+    if st.button("Covered Call", use_container_width=True): set_strategy("Covered Call")
+    if st.button("Protected Put", use_container_width=True): set_strategy("Protected Put")
+
+with col_bear:
+    st.subheader("Bearish")
+    if st.button("Bear Put Spread", use_container_width=True): set_strategy("Bear Put Spread")
+    if st.button("Bear Call Spread", use_container_width=True): set_strategy("Bear Call Spread")
+
+with col_other:
+    st.subheader("Other")
+    if st.button("Long Straddle", use_container_width=True): set_strategy("Long Straddle")
+    if st.button("Collar", use_container_width=True): set_strategy("Collar")
 
 st.markdown("---")
 st.markdown("### Strategy Builder")
@@ -241,16 +258,21 @@ for i, leg in enumerate(st.session_state.legs):
         leg['price'] = price
         cols[3].metric("Value", f"${qty*price:,.0f}")
     else:
-        # Bi-Directional Strike Logic
-        # 1. Strike Input
+        # Bi-Directional Keys
         s_key = f"strike_{lid}"
+        p_key = f"pct_{lid}"
+        
+        # 1. Strike Input
         cols[2].number_input("Strike ($)", value=float(leg['strike']), step=0.5, format="%.2f", 
-                           key=s_key, on_change=on_strike_change, args=(lid, s_key))
+                           key=s_key, 
+                           on_change=on_strike_change, 
+                           args=(lid, s_key, p_key)) # Pass both keys
         
         # 2. Pct Input
-        p_key = f"pct_{lid}"
         cols[3].number_input("Strike %", value=float(leg['strike_pct']), step=1.0, format="%.1f", 
-                           key=p_key, on_change=on_pct_change, args=(lid, p_key))
+                           key=p_key, 
+                           on_change=on_pct_change, 
+                           args=(lid, s_key, p_key)) # Pass both keys
 
         # Premium
         prem = cols[4].number_input("Prem ($)", value=float(leg['premium_per_opt']), step=0.05, format="%.2f", key=f"prem_{lid}")
