@@ -362,8 +362,8 @@ if st.session_state.legs and min_chart < max_chart:
     fig.add_trace(go.Scatter(x=price_range, y=pnl_pos, mode='lines', line=dict(width=0), fill='tozeroy', fillcolor='rgba(144, 238, 144, 0.5)', showlegend=False, hoverinfo='skip'))
     fig.add_trace(go.Scatter(x=price_range, y=pnl_neg, mode='lines', line=dict(width=0), fill='tozeroy', fillcolor='rgba(255, 182, 193, 0.5)', showlegend=False, hoverinfo='skip'))
     
-    # 2. Individual Leg Traces (The Breakdown)
-    colors = ['#FF9999', '#99FF99', '#9999FF', '#FFFF99', '#FFCC99'] # Pastel colors for legs
+    # 2. Individual Leg Traces
+    colors = ['#FF9999', '#99FF99', '#9999FF', '#FFFF99', '#FFCC99']
     for i, leg in enumerate(st.session_state.legs):
         single_leg_pnl = calc_pnl_for_legs([leg], price_range)
         fig.add_trace(go.Scatter(
@@ -375,19 +375,17 @@ if st.session_state.legs and min_chart < max_chart:
         ))
 
     # 3. Main Total P&L Line
+    # Note: Removed "Stock Price: $..." from here because it's now in the X-Axis Header
     fig.add_trace(go.Scatter(
         x=price_range, y=total_pnl, mode='lines', name='Total P&L',
         line=dict(color='darkblue', width=3),
-        hovertemplate="<b>Stock Price: $%{x:.2f}</b><br><b>Total P&L: $%{y:,.0f}</b><extra></extra>"
+        hovertemplate="<b>Total P&L: $%{y:,.0f}</b><extra></extra>"
     ))
 
     # 4. CONDITIONAL Benchmark (Only show if 'Long Share' exists)
     has_share = any(leg['type'] == 'Long Share' for leg in st.session_state.legs)
     if has_share:
-        # Find the share quantity to make the comparison fair
-        # We sum all share quantities (just in case multiple share legs exist)
         share_qty = sum(leg['quantity'] for leg in st.session_state.legs if leg['type'] == 'Long Share')
-        
         bench_pnl = (price_range - st.session_state.reference_price) * share_qty
         fig.add_trace(go.Scatter(
             x=price_range, y=bench_pnl,
@@ -398,7 +396,7 @@ if st.session_state.legs and min_chart < max_chart:
 
     fig.add_hline(y=0, line_color="black", line_width=1)
     
-    # Calculations for Annotations based on TOTAL P&L
+    # Annotations
     signs = np.sign(total_pnl)
     flips = np.where(np.diff(signs))[0]
     be_points = []
@@ -424,7 +422,10 @@ if st.session_state.legs and min_chart < max_chart:
 
     fig.update_layout(
         title="Profit / Loss at Expiration",
-        xaxis_title="Stock Price at Expiration ($)",
+        xaxis=dict(
+            title="Stock Price at Expiration ($)", 
+            hoverformat="$.2f" # This puts the price in the Header!
+        ),
         yaxis_title="P&L ($)",
         hovermode="x unified",
         height=700,
