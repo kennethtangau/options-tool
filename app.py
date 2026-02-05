@@ -338,7 +338,8 @@ for i, leg in enumerate(st.session_state.legs):
         cols[5].number_input("Total Prem ($)", value=float(leg['total_prem']), step=10.0, format="%.2f", 
                            key=prem_total_key, on_change=on_prem_total_change, args=(lid, q_key, prem_unit_key, prem_total_key))
         
-        cols[6].date_input("Expiry", value=leg['expiry'], key=f"exp_{lid}")
+        # DATE FORMAT CHANGED HERE
+        cols[6].date_input("Expiry", value=leg['expiry'], key=f"exp_{lid}", format="DD/MM/YYYY")
 
     if cols[7].button("X", key=f"del_{lid}"):
         remove_leg(lid)
