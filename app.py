@@ -17,6 +17,38 @@ if 'reference_price' not in st.session_state:
 if 'asx_code' not in st.session_state:
     st.session_state.asx_code = "BHP"
 
+# --- Strategy Info Data (For the Popups) ---
+STRATEGY_INFO = {
+    "Bull Call Spread": {
+        "mech": "Buy ITM/ATM Call + Sell OTM Call",
+        "use": "Moderately Bullish. You want to profit from a rise but limit your upfront cost.",
+    },
+    "Covered Call": {
+        "mech": "Own the Share + Sell a Call Option",
+        "use": "Neutral to Slightly Bullish. You want to generate extra income (yield) from shares you already own.",
+    },
+    "Protected Put": {
+        "mech": "Own the Share + Buy a Put Option",
+        "use": "Bullish but Nervous. You want to hold the share but insure against a crash.",
+    },
+    "Bear Put Spread": {
+        "mech": "Buy ITM/ATM Put + Sell OTM Put",
+        "use": "Moderately Bearish. You expect a drop but want to reduce the cost of the Put.",
+    },
+    "Bear Call Spread": {
+        "mech": "Sell ITM/ATM Call + Buy OTM Call",
+        "use": "Bearish. You earn premium if the stock stays flat or drops.",
+    },
+    "Long Straddle": {
+        "mech": "Buy Call + Buy Put (Same Strike)",
+        "use": "High Volatility. You expect a HUGE move, but don't know which direction (e.g. Earnings report).",
+    },
+    "Collar": {
+        "mech": "Own Share + Buy Put + Sell Call",
+        "use": "Conservative. You want 'Free Insurance'. The sold Call pays for the protective Put.",
+    }
+}
+
 # --- Helper Functions ---
 def fetch_price():
     code = st.session_state.asx_code_input.upper()
@@ -24,7 +56,6 @@ def fetch_price():
         code += '.AX'
     try:
         ticker = yf.Ticker(code)
-        # Try fast fetch, fallback to history
         price = ticker.info.get('currentPrice') or ticker.info.get('previousClose')
         if not price:
             hist = ticker.history(period="1d")
@@ -33,7 +64,6 @@ def fetch_price():
 
         if price:
             st.session_state.reference_price = float(price)
-            # Update Share legs automatically
             for leg in st.session_state.legs:
                 if leg['type'] == 'Share':
                     leg['price'] = float(price)
@@ -54,7 +84,6 @@ def create_leg(leg_type='Long Call'):
     if leg_type == 'Share':
         new_leg['price'] = ref_price
     else:
-        # Defaults
         new_leg['strike'] = ref_price
         new_leg['strike_pct'] = 100.0
         new_leg['premium_per_opt'] = float(round(ref_price * 0.05, 2))
@@ -72,98 +101,66 @@ def set_strategy(strategy_name):
     st.session_state.legs = []
     ref = float(st.session_state.reference_price)
     
-    # --- BULLISH ---
+    # BULLISH
     if strategy_name == "Bull Call Spread":
-        l1 = create_leg('Long Call')
-        l1['strike'] = ref; l1['strike_pct'] = 100.0
-        
-        l2 = create_leg('Short Call')
-        l2['strike'] = ref * 1.05; l2['strike_pct'] = 105.0
-        l2['premium_per_opt'] = ref * 0.02
+        l1 = create_leg('Long Call'); l1['strike'] = ref; l1['strike_pct'] = 100.0
+        l2 = create_leg('Short Call'); l2['strike'] = ref * 1.05; l2['strike_pct'] = 105.0; l2['premium_per_opt'] = ref * 0.02
         st.session_state.legs.extend([l1, l2])
 
     elif strategy_name == "Covered Call":
         l1 = create_leg('Share')
-        l2 = create_leg('Short Call')
-        l2['strike'] = ref * 1.05; l2['strike_pct'] = 105.0
-        l2['premium_per_opt'] = ref * 0.02
+        l2 = create_leg('Short Call'); l2['strike'] = ref * 1.05; l2['strike_pct'] = 105.0; l2['premium_per_opt'] = ref * 0.02
         st.session_state.legs.extend([l1, l2])
 
     elif strategy_name == "Protected Put":
         l1 = create_leg('Share')
-        l2 = create_leg('Long Put')
-        l2['strike'] = ref * 0.95; l2['strike_pct'] = 95.0
-        l2['premium_per_opt'] = ref * 0.03
+        l2 = create_leg('Long Put'); l2['strike'] = ref * 0.95; l2['strike_pct'] = 95.0; l2['premium_per_opt'] = ref * 0.03
         st.session_state.legs.extend([l1, l2])
 
-    # --- BEARISH ---
+    # BEARISH
     elif strategy_name == "Bear Put Spread":
-        l1 = create_leg('Long Put')
-        l1['strike'] = ref; l1['strike_pct'] = 100.0
-        l1['premium_per_opt'] = ref * 0.05
-
-        l2 = create_leg('Short Put')
-        l2['strike'] = ref * 0.90; l2['strike_pct'] = 90.0
-        l2['premium_per_opt'] = ref * 0.02
+        l1 = create_leg('Long Put'); l1['strike'] = ref; l1['strike_pct'] = 100.0; l1['premium_per_opt'] = ref * 0.05
+        l2 = create_leg('Short Put'); l2['strike'] = ref * 0.90; l2['strike_pct'] = 90.0; l2['premium_per_opt'] = ref * 0.02
         st.session_state.legs.extend([l1, l2])
         
     elif strategy_name == "Bear Call Spread":
-        l1 = create_leg('Short Call')
-        l1['strike'] = ref; l1['strike_pct'] = 100.0
-        l1['premium_per_opt'] = ref * 0.05
-
-        l2 = create_leg('Long Call')
-        l2['strike'] = ref * 1.10; l2['strike_pct'] = 110.0
-        l2['premium_per_opt'] = ref * 0.01
+        l1 = create_leg('Short Call'); l1['strike'] = ref; l1['strike_pct'] = 100.0; l1['premium_per_opt'] = ref * 0.05
+        l2 = create_leg('Long Call'); l2['strike'] = ref * 1.10; l2['strike_pct'] = 110.0; l2['premium_per_opt'] = ref * 0.01
         st.session_state.legs.extend([l1, l2])
 
-    # --- NEUTRAL / VOL ---
+    # NEUTRAL
     elif strategy_name == "Long Straddle":
-        l1 = create_leg('Long Call')
-        l1['strike'] = ref; l1['strike_pct'] = 100.0
-        
-        l2 = create_leg('Long Put')
-        l2['strike'] = ref; l2['strike_pct'] = 100.0
+        l1 = create_leg('Long Call'); l1['strike'] = ref; l1['strike_pct'] = 100.0
+        l2 = create_leg('Long Put'); l2['strike'] = ref; l2['strike_pct'] = 100.0
         st.session_state.legs.extend([l1, l2])
         
     elif strategy_name == "Collar":
         l1 = create_leg('Share')
-        l2 = create_leg('Long Put')
-        l2['strike'] = ref * 0.95; l2['strike_pct'] = 95.0
-        l3 = create_leg('Short Call')
-        l3['strike'] = ref * 1.05; l3['strike_pct'] = 105.0
+        l2 = create_leg('Long Put'); l2['strike'] = ref * 0.95; l2['strike_pct'] = 95.0
+        l3 = create_leg('Short Call'); l3['strike'] = ref * 1.05; l3['strike_pct'] = 105.0
         st.session_state.legs.extend([l1, l2, l3])
 
-
-# --- Bi-Directional Callbacks (THE FIX) ---
+# --- Callbacks ---
 def on_strike_change(lid, strike_key, pct_key):
-    # User updated Strike ($) -> We force update Pct (%)
     new_strike = st.session_state[strike_key]
     ref = st.session_state.reference_price
-    
-    # Update Leg Data
     for leg in st.session_state.legs:
         if leg['id'] == lid:
             leg['strike'] = new_strike
             if ref > 0:
                 new_pct = round((new_strike / ref) * 100, 1)
                 leg['strike_pct'] = new_pct
-                # FORCE update the other widget
                 st.session_state[pct_key] = new_pct
             break
 
 def on_pct_change(lid, strike_key, pct_key):
-    # User updated Pct (%) -> We force update Strike ($)
     new_pct = st.session_state[pct_key]
     ref = st.session_state.reference_price
-    
-    # Update Leg Data
     for leg in st.session_state.legs:
         if leg['id'] == lid:
             leg['strike_pct'] = new_pct
             new_strike = round(ref * (new_pct / 100.0), 2)
             leg['strike'] = new_strike
-            # FORCE update the other widget
             st.session_state[strike_key] = new_strike
             break
 
@@ -189,6 +186,19 @@ def calculate_payoff(price_range):
         total += pnl
     return total
 
+# --- Helper UI: Strategy Button with Popup ---
+def render_strat_btn(name):
+    c1, c2 = st.columns([5, 1])
+    if c1.button(name, use_container_width=True):
+        set_strategy(name)
+    
+    # The "?" Popup
+    info = STRATEGY_INFO.get(name, {})
+    with c2.popover("?", use_container_width=True):
+        st.markdown(f"**{name}**")
+        st.markdown(f"**Mechanics:** {info.get('mech','')}")
+        st.markdown(f"**When to use?** {info.get('use','')}")
+
 # ================= UI =================
 with st.sidebar:
     st.header("1. Stock Setup")
@@ -209,25 +219,25 @@ with st.sidebar:
 # --- Main Area ---
 st.title("ASX Options Visualizer")
 
-# --- Strategy Buttons (Column Layout) ---
+# --- Strategy Buttons ---
 st.markdown("### Common Strategies")
 col_bull, col_bear, col_other = st.columns(3)
 
 with col_bull:
-    st.subheader("Bullish")
-    if st.button("Bull Call Spread", use_container_width=True): set_strategy("Bull Call Spread")
-    if st.button("Covered Call", use_container_width=True): set_strategy("Covered Call")
-    if st.button("Protected Put", use_container_width=True): set_strategy("Protected Put")
+    st.caption("BULLISH")
+    render_strat_btn("Bull Call Spread")
+    render_strat_btn("Covered Call")
+    render_strat_btn("Protected Put")
 
 with col_bear:
-    st.subheader("Bearish")
-    if st.button("Bear Put Spread", use_container_width=True): set_strategy("Bear Put Spread")
-    if st.button("Bear Call Spread", use_container_width=True): set_strategy("Bear Call Spread")
+    st.caption("BEARISH")
+    render_strat_btn("Bear Put Spread")
+    render_strat_btn("Bear Call Spread")
 
 with col_other:
-    st.subheader("Other")
-    if st.button("Long Straddle", use_container_width=True): set_strategy("Long Straddle")
-    if st.button("Collar", use_container_width=True): set_strategy("Collar")
+    st.caption("OTHER")
+    render_strat_btn("Long Straddle")
+    render_strat_btn("Collar")
 
 st.markdown("---")
 st.markdown("### Strategy Builder")
@@ -244,41 +254,35 @@ for i, leg in enumerate(st.session_state.legs):
     # Type
     new_type = cols[0].selectbox("Type", ["Share", "Long Call", "Short Call", "Long Put", "Short Put"], 
                                  index=["Share", "Long Call", "Short Call", "Long Put", "Short Put"].index(leg['type']), 
-                                 key=f"type_{lid}")
+                                 key=f"type_{lid}", label_visibility="collapsed")
     if new_type != leg['type']:
         leg['type'] = new_type
         st.rerun()
 
     # Qty
-    qty = cols[1].number_input("Qty", value=int(leg['quantity']), step=100, key=f"qty_{lid}")
+    qty = cols[1].number_input("Qty", value=int(leg['quantity']), step=100, key=f"qty_{lid}", label_visibility="collapsed")
     leg['quantity'] = qty
 
     if leg['type'] == 'Share':
-        price = cols[2].number_input("Price", value=float(leg['price']), format="%.2f", key=f"s_price_{lid}")
+        price = cols[2].number_input("Price", value=float(leg['price']), format="%.2f", key=f"s_price_{lid}", label_visibility="collapsed")
         leg['price'] = price
-        cols[3].metric("Value", f"${qty*price:,.0f}")
+        # Small Value Text
+        cols[3].markdown(f"**Val:** ${qty*price:,.0f}")
     else:
-        # Bi-Directional Keys
         s_key = f"strike_{lid}"
         p_key = f"pct_{lid}"
         
-        # 1. Strike Input
-        cols[2].number_input("Strike ($)", value=float(leg['strike']), step=0.5, format="%.2f", 
-                           key=s_key, 
-                           on_change=on_strike_change, 
-                           args=(lid, s_key, p_key)) # Pass both keys
+        cols[2].number_input("Strike", value=float(leg['strike']), step=0.5, format="%.2f", 
+                           key=s_key, on_change=on_strike_change, args=(lid, s_key, p_key), label_visibility="collapsed")
         
-        # 2. Pct Input
-        cols[3].number_input("Strike %", value=float(leg['strike_pct']), step=1.0, format="%.1f", 
-                           key=p_key, 
-                           on_change=on_pct_change, 
-                           args=(lid, s_key, p_key)) # Pass both keys
+        cols[3].number_input("Pct", value=float(leg['strike_pct']), step=1.0, format="%.1f", 
+                           key=p_key, on_change=on_pct_change, args=(lid, s_key, p_key), label_visibility="collapsed")
 
-        # Premium
-        prem = cols[4].number_input("Prem ($)", value=float(leg['premium_per_opt']), step=0.05, format="%.2f", key=f"prem_{lid}")
+        prem = cols[4].number_input("Prem", value=float(leg['premium_per_opt']), step=0.05, format="%.2f", key=f"prem_{lid}", label_visibility="collapsed")
         leg['premium_per_opt'] = prem
-        cols[5].metric("Total", f"${qty*prem:,.0f}")
-        cols[6].date_input("Expiry", value=leg['expiry'], key=f"exp_{lid}")
+        # Small Value Text
+        cols[5].markdown(f"**Tot:** ${qty*prem:,.0f}")
+        cols[6].date_input("Exp", value=leg['expiry'], key=f"exp_{lid}", label_visibility="collapsed")
 
     if cols[7].button("X", key=f"del_{lid}"):
         remove_leg(lid)
@@ -294,50 +298,29 @@ if st.session_state.legs and min_chart < max_chart:
     price_range = np.linspace(min_chart, max_chart, 500)
     pnl = calculate_payoff(price_range)
     
-    # Split PnL into Profit (Green) and Loss (Red) arrays for shading
     pnl_pos = np.where(pnl >= 0, pnl, 0)
     pnl_neg = np.where(pnl < 0, pnl, 0)
 
     fig = go.Figure()
     
-    # 1. Green Area (Profit)
-    fig.add_trace(go.Scatter(
-        x=price_range, y=pnl_pos, mode='lines', name='Profit',
-        line=dict(width=0), # Invisible line, just fill
-        fill='tozeroy', fillcolor='rgba(144, 238, 144, 0.5)' # Light Green
-    ))
+    fig.add_trace(go.Scatter(x=price_range, y=pnl_pos, mode='lines', name='Profit', line=dict(width=0), fill='tozeroy', fillcolor='rgba(144, 238, 144, 0.5)'))
+    fig.add_trace(go.Scatter(x=price_range, y=pnl_neg, mode='lines', name='Loss', line=dict(width=0), fill='tozeroy', fillcolor='rgba(255, 182, 193, 0.5)'))
+    fig.add_trace(go.Scatter(x=price_range, y=pnl, mode='lines', name='Total P&L', line=dict(color='darkblue', width=3)))
     
-    # 2. Red Area (Loss)
-    fig.add_trace(go.Scatter(
-        x=price_range, y=pnl_neg, mode='lines', name='Loss',
-        line=dict(width=0), 
-        fill='tozeroy', fillcolor='rgba(255, 182, 193, 0.5)' # Light Red
-    ))
-    
-    # 3. Main P&L Line (Dark Blue)
-    fig.add_trace(go.Scatter(
-        x=price_range, y=pnl, mode='lines', name='Total P&L',
-        line=dict(color='darkblue', width=3)
-    ))
-
-    # 4. Zero Line
     fig.add_hline(y=0, line_dash="solid", line_color="black", line_width=1)
 
-    # 5. Benchmark (Share Only)
     bench_pnl = (price_range - st.session_state.reference_price) * 100
-    fig.add_trace(go.Scatter(
-        x=price_range, y=bench_pnl, mode='lines', name='Share Only',
-        line=dict(color='gray', dash='dot', width=1)
-    ))
+    fig.add_trace(go.Scatter(x=price_range, y=bench_pnl, mode='lines', name='Share Only', line=dict(color='gray', dash='dot', width=1)))
 
-    # Layout - Taller Height
     fig.update_layout(
         title="Profit / Loss at Expiration",
         xaxis_title="Stock Price",
         yaxis_title="P&L ($)",
         hovermode="x unified",
-        height=600, # Taller chart as requested
-        margin=dict(l=20, r=20, t=40, b=20)
+        height=700,  # Taller Chart
+        font=dict(size=14), # Bigger Font
+        margin=dict(l=20, r=20, t=40, b=20),
+        yaxis=dict(autorange=True) # Auto-Scale Y Axis
     )
     
     st.plotly_chart(fig, use_container_width=True)
