@@ -86,11 +86,12 @@ def create_leg(leg_type='Long Call'):
     }
     if leg_type == 'Share':
         new_leg['price'] = ref_price
-        new_leg['share_val'] = ref_price * 100 # Init value
+        new_leg['share_val'] = ref_price * 100
     else:
         new_leg['strike'] = ref_price
         new_leg['strike_pct'] = 100.0
         new_leg['premium_per_opt'] = float(round(ref_price * 0.05, 2))
+        new_leg['total_prem'] = new_leg['premium_per_opt'] * 100
     return new_leg
 
 def add_leg():
@@ -114,6 +115,7 @@ def set_strategy(strategy_name):
             l['strike'] = t['strike']
             l['strike_pct'] = round((t['strike']/ref)*100, 1)
             l['premium_per_opt'] = float(round(t['premium'], 2))
+            l['total_prem'] = l['premium_per_opt'] * l['quantity']
         st.session_state.legs.append(l)
 
 # --- Calculation Logic ---
@@ -163,13 +165,11 @@ def on_pct_change(lid, strike_key, pct_key):
             st.session_state[strike_key] = new_strike
             break
 
-# NEW: Share Value <-> Quantity Sync
 def on_share_qty_change(lid, qty_key, val_key):
     new_qty = st.session_state[qty_key]
     for leg in st.session_state.legs:
         if leg['id'] == lid:
             leg['quantity'] = new_qty
-            # Update Value
             new_val = new_qty * leg['price']
             leg['share_val'] = new_val
             st.session_state[val_key] = new_val
@@ -180,11 +180,34 @@ def on_share_val_change(lid, qty_key, val_key):
     for leg in st.session_state.legs:
         if leg['id'] == lid:
             leg['share_val'] = new_val
-            # Update Qty
             if leg['price'] > 0:
                 new_qty = int(new_val / leg['price'])
                 leg['quantity'] = new_qty
                 st.session_state[qty_key] = new_qty
+            break
+
+# NEW: Premium Sync Callbacks
+def on_prem_unit_change(lid, qty_key, unit_key, total_key):
+    new_unit = st.session_state[unit_key]
+    qty = st.session_state[qty_key]
+    for leg in st.session_state.legs:
+        if leg['id'] == lid:
+            leg['premium_per_opt'] = new_unit
+            new_total = new_unit * qty
+            leg['total_prem'] = new_total
+            st.session_state[total_key] = new_total
+            break
+
+def on_prem_total_change(lid, qty_key, unit_key, total_key):
+    new_total = st.session_state[total_key]
+    qty = st.session_state[qty_key]
+    for leg in st.session_state.legs:
+        if leg['id'] == lid:
+            leg['total_prem'] = new_total
+            if qty > 0:
+                new_unit = new_total / qty
+                leg['premium_per_opt'] = new_unit
+                st.session_state[unit_key] = new_unit
             break
 
 # --- Mini Chart Generator ---
@@ -264,7 +287,7 @@ if not st.session_state.legs:
 for i, leg in enumerate(st.session_state.legs):
     lid = leg['id']
     st.markdown(f"**Leg {i+1}**")
-    cols = st.columns([1.5, 1.2, 1.5, 1.5, 1.2, 1.2, 1.5, 0.5])
+    cols = st.columns([1.5, 1.2, 1.5, 1.5, 1.5, 1.5, 1.5, 0.5]) # Adjusted columns
     
     # 1. Type
     new_type = cols[0].selectbox("Type", ["Share", "Long Call", "Short Call", "Long Put", "Short Put"], 
@@ -288,25 +311,35 @@ for i, leg in enumerate(st.session_state.legs):
         leg['price'] = price
         
         # Value Input (Bi-Directional)
-        # Ensure 'share_val' exists
         if 'share_val' not in leg: leg['share_val'] = qty * price
-        
         cols[3].number_input("Value ($)", value=float(leg['share_val']), step=1000.0, format="%.2f", key=v_key,
                            on_change=on_share_val_change, args=(lid, q_key, v_key))
         
     else:
         # Option Logic
-        qty = cols[1].number_input("Qty", value=int(leg['quantity']), step=100, key=f"qty_{lid}")
+        q_key = f"qty_{lid}"
+        qty = cols[1].number_input("Qty", value=int(leg['quantity']), step=100, key=q_key)
         leg['quantity'] = qty
         
         s_key, p_key = f"strike_{lid}", f"pct_{lid}"
         cols[2].number_input("Strike ($)", value=float(leg['strike']), step=0.5, format="%.2f", key=s_key, on_change=on_strike_change, args=(lid, s_key, p_key))
         cols[3].number_input("Strike (%)", value=float(leg['strike_pct']), step=1.0, format="%.1f", key=p_key, on_change=on_pct_change, args=(lid, s_key, p_key))
         
-        prem = cols[4].number_input("Prem ($)", value=float(leg['premium_per_opt']), step=0.05, format="%.2f", key=f"prem_{lid}")
-        leg['premium_per_opt'] = prem
+        # Bi-Directional Premium Sync
+        prem_unit_key = f"prem_{lid}"
+        prem_total_key = f"prem_tot_{lid}"
         
-        cols[5].markdown(f"**Total:**\n${qty*prem:,.0f}")
+        # Init total if missing
+        if 'total_prem' not in leg: leg['total_prem'] = leg['premium_per_opt'] * qty
+        
+        # Premium Per Option
+        prem = cols[4].number_input("Prem ($) per Opt", value=float(leg['premium_per_opt']), step=0.05, format="%.2f", 
+                                  key=prem_unit_key, on_change=on_prem_unit_change, args=(lid, q_key, prem_unit_key, prem_total_key))
+        
+        # Total Premium
+        cols[5].number_input("Total Prem ($)", value=float(leg['total_prem']), step=10.0, format="%.2f", 
+                           key=prem_total_key, on_change=on_prem_total_change, args=(lid, q_key, prem_unit_key, prem_total_key))
+        
         cols[6].date_input("Expiry", value=leg['expiry'], key=f"exp_{lid}")
 
     if cols[7].button("X", key=f"del_{lid}"):
