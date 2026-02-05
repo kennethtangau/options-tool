@@ -21,36 +21,31 @@ if 'asx_code' not in st.session_state:
 
 # --- Helper: Shareable Links (URL <-> State) ---
 def update_url():
-    # Convert legs to a simplified JSON format for the URL
     if 'legs' in st.session_state:
-        # We only save essential fields to keep URL short
         minified_legs = []
         for l in st.session_state.legs:
+            # Save essential fields only
             leg_data = {
                 't': l['type'],
                 'q': l['quantity'],
-                'p': l.get('price', 0), # Share price
-                'k': l.get('strike', 0), # Strike
-                'c': l.get('premium_per_opt', 0), # Cost/Prem
-                'e': l['expiry'].strftime("%Y-%m-%d") # Expiry date string
+                'p': l.get('price', 0),
+                'k': l.get('strike', 0),
+                'c': l.get('premium_per_opt', 0),
+                'e': l['expiry'].strftime("%Y-%m-%d")
             }
             minified_legs.append(leg_data)
         
-        # Serialize to JSON then Base64 to make it URL-safe
         json_str = json.dumps(minified_legs)
         b64_str = base64.urlsafe_b64encode(json_str.encode()).decode()
         
-        # Update URL Query Param
         st.query_params["s"] = b64_str
         st.query_params["ref"] = str(st.session_state.reference_price)
         st.query_params["code"] = st.session_state.asx_code
 
 def load_from_url():
-    # Check if we have params
     qp = st.query_params
     if "s" in qp:
         try:
-            # Decode Base64 -> JSON -> List
             b64_str = qp["s"]
             json_str = base64.urlsafe_b64decode(b64_str).decode()
             minified_legs = json.loads(json_str)
@@ -68,7 +63,8 @@ def load_from_url():
                     new_leg['strike'] = m['k']
                     new_leg['premium_per_opt'] = m['c']
                     new_leg['total_prem'] = m['c'] * m['q']
-                    # Calc pct based on current ref price (or stored ref)
+                    
+                    # Recalc strike % if ref exists
                     ref = float(qp.get("ref", 10.0))
                     if ref > 0:
                         new_leg['strike_pct'] = round((m['k'] / ref) * 100, 1)
@@ -102,7 +98,7 @@ def fetch_price():
             for leg in st.session_state.legs:
                 if leg['type'] == 'Long Share':
                     leg['price'] = float(price)
-            update_url() # Update URL on price change
+            update_url()
     except Exception as e:
         st.error(f"Error fetching price: {e}")
 
@@ -134,14 +130,11 @@ def remove_leg(leg_id):
     update_url()
 
 def set_strategy(strategy_name):
-    # (Same strategy logic as before, just calling update_url at end)
     st.session_state.legs = []
     ref = float(st.session_state.reference_price)
     legs = []
     
-    # ... (Strategy Definitions) ...
-    # Simplified here for brevity, assuming standard logic from previous step
-    # Re-using the same get_strat_legs logic inside here directly:
+    # Strategy Logic (Simplified for brevity but identical logic)
     if strategy_name == "Bull Call Spread":
         legs.append({'type': 'Long Call', 'strike': ref, 'quantity': 100, 'premium': ref*0.05})
         legs.append({'type': 'Short Call', 'strike': ref*1.1, 'quantity': 100, 'premium': ref*0.02})
@@ -165,7 +158,6 @@ def set_strategy(strategy_name):
         legs.append({'type': 'Long Put', 'strike': ref*0.9, 'quantity': 100, 'premium': ref*0.03})
         legs.append({'type': 'Short Call', 'strike': ref*1.1, 'quantity': 100, 'premium': ref*0.02})
 
-    # Create actual leg objects
     for t in legs:
         l = create_leg(t['type'])
         l['quantity'] = t['quantity']
@@ -178,7 +170,6 @@ def set_strategy(strategy_name):
             l['premium_per_opt'] = float(round(t['premium'], 2))
             l['total_prem'] = l['premium_per_opt'] * l['quantity']
         st.session_state.legs.append(l)
-    
     update_url()
 
 # --- Calculation Logic ---
@@ -204,7 +195,7 @@ def calc_pnl_for_legs(legs, price_range):
         total += pnl
     return total
 
-# --- Callbacks (Sync Logic) with URL Update ---
+# --- Callbacks ---
 def on_strike_change(lid, strike_key, pct_key):
     new_strike = st.session_state[strike_key]
     ref = st.session_state.reference_price
@@ -212,9 +203,8 @@ def on_strike_change(lid, strike_key, pct_key):
         if leg['id'] == lid:
             leg['strike'] = new_strike
             if ref > 0:
-                new_pct = round((new_strike / ref) * 100, 1)
-                leg['strike_pct'] = new_pct
-                st.session_state[pct_key] = new_pct
+                leg['strike_pct'] = round((new_strike / ref) * 100, 1)
+                st.session_state[pct_key] = leg['strike_pct']
             break
     update_url()
 
@@ -224,9 +214,8 @@ def on_pct_change(lid, strike_key, pct_key):
     for leg in st.session_state.legs:
         if leg['id'] == lid:
             leg['strike_pct'] = new_pct
-            new_strike = round(ref * (new_pct / 100.0), 2)
-            leg['strike'] = new_strike
-            st.session_state[strike_key] = new_strike
+            leg['strike'] = round(ref * (new_pct / 100.0), 2)
+            st.session_state[strike_key] = leg['strike']
             break
     update_url()
 
@@ -235,9 +224,8 @@ def on_share_qty_change(lid, qty_key, val_key):
     for leg in st.session_state.legs:
         if leg['id'] == lid:
             leg['quantity'] = new_qty
-            new_val = new_qty * leg['price']
-            leg['share_val'] = new_val
-            st.session_state[val_key] = new_val
+            leg['share_val'] = new_qty * leg['price']
+            st.session_state[val_key] = leg['share_val']
             break
     update_url()
 
@@ -247,9 +235,8 @@ def on_share_val_change(lid, qty_key, val_key):
         if leg['id'] == lid:
             leg['share_val'] = new_val
             if leg['price'] > 0:
-                new_qty = int(new_val / leg['price'])
-                leg['quantity'] = new_qty
-                st.session_state[qty_key] = new_qty
+                leg['quantity'] = int(new_val / leg['price'])
+                st.session_state[qty_key] = leg['quantity']
             break
     update_url()
 
@@ -259,9 +246,8 @@ def on_prem_unit_change(lid, qty_key, unit_key, total_key):
     for leg in st.session_state.legs:
         if leg['id'] == lid:
             leg['premium_per_opt'] = new_unit
-            new_total = new_unit * qty
-            leg['total_prem'] = new_total
-            st.session_state[total_key] = new_total
+            leg['total_prem'] = new_unit * qty
+            st.session_state[total_key] = leg['total_prem']
             break
     update_url()
 
@@ -272,16 +258,14 @@ def on_prem_total_change(lid, qty_key, unit_key, total_key):
         if leg['id'] == lid:
             leg['total_prem'] = new_total
             if qty > 0:
-                new_unit = new_total / qty
-                leg['premium_per_opt'] = new_unit
-                st.session_state[unit_key] = new_unit
+                leg['premium_per_opt'] = new_total / qty
+                st.session_state[unit_key] = leg['premium_per_opt']
             break
     update_url()
 
-# --- INIT: Load from URL if present ---
+# --- INIT ---
 if 'legs' not in st.session_state or not st.session_state.legs:
     load_from_url()
-
 
 # ================= MAIN UI =================
 with st.sidebar:
@@ -296,6 +280,32 @@ with st.sidebar:
     c1, c2 = st.columns(2)
     min_chart = c1.number_input("Min X", value=float(round(ref*0.7, 2)), format="%.2f")
     max_chart = c2.number_input("Max X", value=float(round(ref*1.3, 2)), format="%.2f")
+    
+    st.markdown("---")
+    # Share Link Section
+    st.markdown("### 🔗 Share Strategy")
+    # We display the current URL so they can copy it
+    # Note: Streamlit doesn't support a one-click copy natively without extensions, 
+    # but a code block is easy to select/copy.
+    
+    # Construct full URL (assumes standard streamlit cloud url structure if you know it, otherwise just display path)
+    # Using st.query_params to get current state
+    base_url = "https://options-tool-kennethtangau.streamlit.app/" # Replace if different
+    
+    # We re-generate the query string to show it live
+    if 'legs' in st.session_state and st.session_state.legs:
+         minified_legs = []
+         for l in st.session_state.legs:
+             minified_legs.append({
+                 't': l['type'], 'q': l['quantity'], 'p': l.get('price',0), 'k': l.get('strike',0),
+                 'c': l.get('premium_per_opt',0), 'e': l['expiry'].strftime("%Y-%m-%d")
+             })
+         json_str = json.dumps(minified_legs)
+         b64_str = base64.urlsafe_b64encode(json_str.encode()).decode()
+         final_url = f"{base_url}?s={b64_str}&ref={st.session_state.reference_price}&code={st.session_state.asx_code}"
+         
+         st.text_input("Copy Link:", value=final_url, read_only=True)
+         st.caption("Copy this URL to share this exact strategy.")
 
 st.title("ASX Options Visualizer")
 
@@ -375,7 +385,7 @@ for i, leg in enumerate(st.session_state.legs):
 
 st.button("+ Add Leg", on_click=add_leg)
 
-# --- Visualization & Dashboard ---
+# --- Visualization ---
 st.markdown("---")
 st.markdown("### Payoff Analysis")
 
@@ -383,49 +393,9 @@ if st.session_state.legs and min_chart < max_chart:
     price_range = np.linspace(min_chart, max_chart, 500)
     total_pnl = calc_pnl_for_legs(st.session_state.legs, price_range)
     
-    # --- DASHBOARD METRICS CALCULATION ---
-    max_p = np.max(total_pnl)
-    max_l = np.min(total_pnl)
-    
-    # Breakeven Calculation
-    signs = np.sign(total_pnl)
-    flips = np.where(np.diff(signs))[0]
-    be_points = []
-    for f in flips:
-        x1, x2 = price_range[f], price_range[f+1]
-        y1, y2 = total_pnl[f], total_pnl[f+1]
-        if y2 != y1:
-            x_zero = x1 - y1 * (x2 - x1) / (y2 - y1)
-            be_points.append(x_zero)
-            
-    # --- RENDER DASHBOARD ---
-    m1, m2, m3 = st.columns(3)
-    
-    # Max Profit Metric
-    if max_p > 1e6:
-        m1.metric("Max Profit", "Unlimited", delta_color="normal")
-    else:
-        m1.metric("Max Profit", f"${max_p:,.0f}", delta_color="normal")
-        
-    # Max Loss Metric (Red)
-    if max_l < -1e6:
-        m2.metric("Max Loss", "Unlimited", delta="-Infinite", delta_color="inverse")
-    else:
-        # We display loss as a negative number in Red
-        m2.metric("Max Loss", f"${max_l:,.0f}", delta=f"{max_l:,.0f}", delta_color="inverse")
-        
-    # Breakeven Metric
-    if not be_points:
-        m3.metric("Breakeven", "None")
-    else:
-        be_str = ", ".join([f"${b:.2f}" for b in be_points])
-        m3.metric("Breakeven", be_str)
-
-    st.markdown("---")
-
-    # --- CHART ---
+    # Chart
     fig = go.Figure()
-    
+
     # Shading
     pnl_pos = np.where(total_pnl >= 0, total_pnl, 0)
     pnl_neg = np.where(total_pnl < 0, total_pnl, 0)
@@ -465,6 +435,30 @@ if st.session_state.legs and min_chart < max_chart:
 
     fig.add_hline(y=0, line_color="black", line_width=1)
     
+    # RESTORED ANNOTATIONS (Arrows)
+    signs = np.sign(total_pnl)
+    flips = np.where(np.diff(signs))[0]
+    be_points = []
+    for f in flips:
+        x1, x2 = price_range[f], price_range[f+1]
+        y1, y2 = total_pnl[f], total_pnl[f+1]
+        if y2 != y1:
+            x_zero = x1 - y1 * (x2 - x1) / (y2 - y1)
+            be_points.append(x_zero)
+            
+    max_p = np.max(total_pnl)
+    max_l = np.min(total_pnl)
+    max_x = price_range[int(np.median(np.where(total_pnl == max_p)[0]))]
+    min_x = price_range[int(np.median(np.where(total_pnl == max_l)[0]))]
+
+    annotations = []
+    for be in be_points:
+        annotations.append(dict(x=be, y=0, xref="x", yref="y", text=f"Break-Even: ${be:.2f}", showarrow=True, arrowhead=2, ax=0, ay=-40, bgcolor="white", bordercolor="black"))
+    if max_p < 1e6:
+        annotations.append(dict(x=max_x, y=max_p, xref="x", yref="y", text=f"Max Profit: ${max_p:,.0f}", showarrow=True, arrowhead=2, ax=0, ay=-40, bgcolor="#e6ffe6", bordercolor="green"))
+    if max_l > -1e6:
+        annotations.append(dict(x=min_x, y=max_l, xref="x", yref="y", text=f"Max Loss: ${max_l:,.0f}", showarrow=True, arrowhead=2, ax=0, ay=40, bgcolor="#ffe6e6", bordercolor="red"))
+
     fig.update_layout(
         title="Profit / Loss at Expiration",
         xaxis=dict(title="Stock Price at Expiration ($)", hoverformat="$.2f"),
@@ -473,6 +467,7 @@ if st.session_state.legs and min_chart < max_chart:
         height=700,
         font=dict(size=14),
         yaxis=dict(autorange=True),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        annotations=annotations # Added back!
     )
     st.plotly_chart(fig, use_container_width=True)
